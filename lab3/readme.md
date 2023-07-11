@@ -112,7 +112,72 @@ ISIS видит соседей:
 <details>
 <summary>Конфигурация Spine1</summary>
 <pre><code>
-
+! Command: show running-config
+! device: Spine1 (vEOS, EOS-4.21.1.1F)
+!
+! boot system flash:/vEOS-lab.swi
+!
+transceiver qsfp default-mode 4x10G
+!
+hostname Spine1
+!
+spanning-tree mode mstp
+!
+no aaa root
+!
+interface Ethernet1
+   no switchport
+   ip address 10.110.1.0/31
+   isis enable UNDERLAY
+   isis bfd
+   isis network point-to-point
+   isis authentication mode md5
+   isis authentication key 7 kBi6qc4fGf6dN+LSoHvYiQ==
+!
+interface Ethernet2
+   no switchport
+   ip address 10.110.1.2/31
+   isis enable UNDERLAY
+   isis bfd
+   isis network point-to-point
+   isis authentication mode md5
+   isis authentication key 7 kBi6qc4fGf6dN+LSoHvYiQ==
+!
+interface Ethernet3
+   no switchport
+   ip address 10.110.1.4/31
+   isis enable UNDERLAY
+   isis bfd
+   isis network point-to-point
+   isis authentication mode md5
+   isis authentication key 7 kBi6qc4fGf6dN+LSoHvYiQ==
+!
+interface Ethernet4
+!
+interface Ethernet5
+!
+interface Ethernet6
+!
+interface Ethernet7
+!
+interface Ethernet8
+!
+interface Loopback0
+   ip address 192.168.110.1/32
+   isis enable UNDERLAY
+!
+interface Management1
+!
+ip routing
+!
+router isis UNDERLAY
+   net 49.0001.1921.6811.0001.00
+   is-type level-2
+   !
+   address-family ipv4 unicast
+      bfd all-interfaces
+!
+end
 </code></pre>
 </details>
 
@@ -135,26 +200,29 @@ no aaa root
 interface Ethernet1
    no switchport
    ip address 10.110.1.6/31
-   ip ospf network point-to-point
-   ip ospf authentication message-digest
-   ip ospf area 0.0.0.0
-   ip ospf message-digest-key 1 md5 7 GiwCiiFBP6Av/3NwX+QW9w==
+   isis enable UNDERLAY
+   isis bfd
+   isis network point-to-point
+   isis authentication mode md5
+   isis authentication key 7 kBi6qc4fGf6dN+LSoHvYiQ==
 !
 interface Ethernet2
    no switchport
    ip address 10.110.1.8/31
-   ip ospf network point-to-point
-   ip ospf authentication message-digest
-   ip ospf area 0.0.0.0
-   ip ospf message-digest-key 1 md5 7 /yIrNdF7UxOJ/C4UPWVz/g==
+   isis enable UNDERLAY
+   isis bfd
+   isis network point-to-point
+   isis authentication mode md5
+   isis authentication key 7 kBi6qc4fGf6dN+LSoHvYiQ==
 !
 interface Ethernet3
    no switchport
    ip address 10.110.1.10/31
-   ip ospf network point-to-point
-   ip ospf authentication message-digest
-   ip ospf area 0.0.0.0
-   ip ospf message-digest-key 1 md5 7 /yIrNdF7UxOJ/C4UPWVz/g==
+   isis enable UNDERLAY
+   isis bfd
+   isis network point-to-point
+   isis authentication mode md5
+   isis authentication key 7 kBi6qc4fGf6dN+LSoHvYiQ==
 !
 interface Ethernet4
 !
@@ -168,16 +236,18 @@ interface Ethernet8
 !
 interface Loopback0
    ip address 192.168.110.4/32
-   ip ospf area 0.0.0.0
+   isis enable UNDERLAY
 !
 interface Management1
 !
 ip routing
 !
-router ospf 1
-   router-id 192.168.110.4
-   bfd all-interfaces
-   max-lsa 12000
+router isis UNDERLAY
+   net 49.0001.1921.6811.0004.00
+   is-type level-2
+   !
+   address-family ipv4 unicast
+      bfd all-interfaces
 !
 end
 </code></pre>
@@ -202,18 +272,20 @@ no aaa root
 interface Ethernet1
    no switchport
    ip address 10.110.1.1/31
-   ip ospf network point-to-point
-   ip ospf authentication message-digest
-   ip ospf area 0.0.0.0
-   ip ospf message-digest-key 1 md5 7 GiwCiiFBP6Av/3NwX+QW9w==
+   isis enable UNDERLAY
+   isis bfd
+   isis network point-to-point
+   isis authentication mode md5
+   isis authentication key 7 kBi6qc4fGf6dN+LSoHvYiQ==
 !
 interface Ethernet2
    no switchport
    ip address 10.110.1.7/31
-   ip ospf network point-to-point
-   ip ospf authentication message-digest
-   ip ospf area 0.0.0.0
-   ip ospf message-digest-key 1 md5 7 /yIrNdF7UxOJ/C4UPWVz/g==
+   isis enable UNDERLAY
+   isis bfd
+   isis network point-to-point
+   isis authentication mode md5
+   isis authentication key 7 kBi6qc4fGf6dN+LSoHvYiQ==
 !
 interface Ethernet3
 !
@@ -229,16 +301,18 @@ interface Ethernet8
 !
 interface Loopback0
    ip address 192.168.110.5/32
-   ip ospf area 0.0.0.0
+   isis enable UNDERLAY
 !
 interface Management1
 !
 ip routing
 !
-router ospf 1
-   router-id 192.168.110.5
-   bfd all-interfaces
-   max-lsa 12000
+router isis UNDERLAY
+   net 49.0001.1921.6811.0005.00
+   is-type level-2
+   !
+   address-family ipv4 unicast
+      bfd all-interfaces
 !
 end
 </code></pre>
@@ -263,20 +337,23 @@ no aaa root
 interface Ethernet1
    no switchport
    ip address 10.110.1.3/31
-   ip ospf network point-to-point
-   ip ospf authentication message-digest
-   ip ospf area 0.0.0.0
-   ip ospf message-digest-key 1 md5 7 GiwCiiFBP6Av/3NwX+QW9w==
+   isis enable UNDERLAY
+   isis bfd
+   isis network point-to-point
+   isis authentication mode md5
+   isis authentication key 7 kBi6qc4fGf6dN+LSoHvYiQ==
 !
 interface Ethernet2
    no switchport
    ip address 10.110.1.9/31
-   ip ospf network point-to-point
-   ip ospf authentication message-digest
-   ip ospf area 0.0.0.0
-   ip ospf message-digest-key 1 md5 7 /yIrNdF7UxOJ/C4UPWVz/g==
+   isis enable UNDERLAY
+   isis bfd
+   isis network point-to-point
+   isis authentication mode md5
+   isis authentication key 7 kBi6qc4fGf6dN+LSoHvYiQ==
 !
 interface Ethernet3
+   isis bfd
 !
 interface Ethernet4
 !
@@ -290,16 +367,18 @@ interface Ethernet8
 !
 interface Loopback0
    ip address 192.168.110.8/32
-   ip ospf area 0.0.0.0
+   isis enable UNDERLAY
 !
 interface Management1
 !
 ip routing
 !
-router ospf 1
-   router-id 192.168.110.8
-   bfd all-interfaces
-   max-lsa 12000
+router isis UNDERLAY
+   net 49.0001.1921.6811.0008.00
+   is-type level-2
+   !
+   address-family ipv4 unicast
+      bfd all-interfaces
 !
 end
 </code></pre>
@@ -324,18 +403,20 @@ no aaa root
 interface Ethernet1
    no switchport
    ip address 10.110.1.5/31
-   ip ospf network point-to-point
-   ip ospf authentication message-digest
-   ip ospf area 0.0.0.0
-   ip ospf message-digest-key 1 md5 7 GiwCiiFBP6Av/3NwX+QW9w==
+   isis enable UNDERLAY
+   isis bfd
+   isis network point-to-point
+   isis authentication mode md5
+   isis authentication key 7 kBi6qc4fGf6dN+LSoHvYiQ==
 !
 interface Ethernet2
    no switchport
    ip address 10.110.1.11/31
-   ip ospf network point-to-point
-   ip ospf authentication message-digest
-   ip ospf area 0.0.0.0
-   ip ospf message-digest-key 1 md5 7 /yIrNdF7UxOJ/C4UPWVz/g==
+   isis enable UNDERLAY
+   isis bfd
+   isis network point-to-point
+   isis authentication mode md5
+   isis authentication key 7 kBi6qc4fGf6dN+LSoHvYiQ==
 !
 interface Ethernet3
 !
@@ -351,16 +432,18 @@ interface Ethernet8
 !
 interface Loopback0
    ip address 192.168.110.11/32
-   ip ospf area 0.0.0.0
+   isis enable UNDERLAY
 !
 interface Management1
 !
 ip routing
 !
-router ospf 1
-   router-id 192.168.110.11
-   bfd all-interfaces
-   max-lsa 12000
+router isis UNDERLAY
+   net 49.0001.1921.6811.0011.00
+   is-type level-2
+   !
+   address-family ipv4 unicast
+      bfd all-interfaces
 !
 end
 </code></pre>
