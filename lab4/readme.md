@@ -148,9 +148,11 @@ show bfd peers
 ```
 
 Все leaf в группе LEAFS_UNDERLAY:
+
 ![Вывод команды show ip bgp peer-group](./images/lab4-2.PNG)
 
 Соседство установилось:
+
 ![Вывод команды show ip bgp summary](./images/lab4-3.PNG)
 
 Таблица маршрутизации на Spine1:
