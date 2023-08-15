@@ -432,6 +432,29 @@ end
 <details>
 <summary>Конфигурация Leaf2</summary>
 <pre><code>
+! Command: show running-config
+! device: Leaf2 (vEOS-lab, EOS-4.26.4M)
+!
+! boot system flash:/vEOS-lab.swi
+!
+no aaa root
+!
+transceiver qsfp default-mode 4x10G
+!
+service routing protocols model multi-agent
+!
+hostname Leaf2
+!
+spanning-tree mode mstp
+!
+vlan 221-222
+!
+interface Ethernet1
+   no switchport
+   ip address 10.110.1.3/31
+!
+interface Ethernet2
+   no switchport
    ip address 10.110.1.9/31
 !
 interface Ethernet3
