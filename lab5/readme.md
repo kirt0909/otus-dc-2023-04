@@ -157,6 +157,11 @@ vxlan vlan <VLAN ID>,<VLAN ID> vni <VNI>,<VNI>
 ```
 show bgp evpn sum
 show bgp evpn route-type imet
+
+!Так же для диганостики можно использовать различные команды, например
+show bgp evpn route-type mac-ip
+show vxlan address-table
+
 ```
 
 В EVPN установилось соседство:
