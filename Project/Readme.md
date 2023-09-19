@@ -331,13 +331,13 @@ interface Vxlan1
 
 *В качестве source interface указываем Lo100*
 
-vxlan source-interface Loopback1
+vxlan source-interface Loopback100
 
 *Привязываем vlan к соответствующим vni*
 
 vxlan vlan 10,20,30,40,50,60,70 vni 10010,10020,10030,10040,10050,10060,10070
 
-*задаеи vni для vrf DS*
+*задаем vni для vrf DS*
 
 vxlan vrf DS vni 10001
 
