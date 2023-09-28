@@ -1,1746 +1,166 @@
-# Лаборная работа 6
+# Лаборная работа 7
 ## **VxLAN. 3**
 ## Цель:
 
-* Настроить отказоустойчивое подключение клиентов с использованием VPC
+* Настроить отказоустойчивое подключение клиентов
 
- ## Решение:
- Работа будет выполнятся на коммутаторах Cisco.
- Настройки Underlay и Overlay и EVPN с симметричным IRB будут выполнены по аналогии с [Лабораторной работой 6](../lab6/).
+
+## Решение:
+Отказоустойчивое решение выполненно на коммутаторах Arista.
+Для обеспечения отказоустойчивости и балансировки трафика на уровне leaf применяется технология MLAG. Для Underlay исползуется OSPF, для Overlay ипользуется iBGP. Маршрутизация выполняется через внешний маршрутизатор FW.
 
  **План работы**
  
  * Собрать схему сети
  * Подключить клиентов двумя линками к различным Leaf
  * Настроите агрегированный канал со стороны клиента
- * Настроите VPC для работы в Overlay сети
+ * Настроите MLAG для работы в Overlay сети
 
- **Адресное пространство Underlay и Overlay сетей**
+**Топология:**
 
- Адреса p2p каналов:
+![](images/project.jpg)
+
+**Адреса p2p каналов:**
+
+
 |  Узел сети уровня Spine | порт| Адрес Spine    | Узел сети уровня Leaf | порт | Адрес Leaf     | Сеть           |
 |---------|---|-------------|-----------|---------|---|----------------|
-| Spine1 | Eth1/1  | 10.110.1.0  | Leaf1 |Eth1/1  | 10.110.1.1 | 10.110.1.0/31  |
-| Spine1 | Eth1/2   | 10.110.1.2  | Leaf2 |Eth1/1   | 10.110.1.3 | 10.110.1.2/31  |
-| Spine1 | Eth1/3   | 10.110.1.4  | Leaf3 |Eth1/1  | 10.110.1.5 | 10.110.1.4/31  |
+| Spine1 | Eth1   | 10.10.1.0  | Leaf1-1 |Eth1    | 10.10.1.1 | 10.10.1.0/31  |
+| Spine1 | Eth2   | 10.10.1.2  | Leaf1-2 |Eth1    | 10.10.1.3 | 10.10.1.2/31  |
+| Spine1 | Eth3   | 10.10.1.4  | Leaf2-1 |Eth1    | 10.10.1.5 | 10.10.1.4/31  |
+| Spine1 | Eth4   | 10.10.1.6  | Leaf2-2 |Eth1    | 10.10.1.7 | 10.10.1.6/31  |
+| Spine2 | Eth1   | 10.10.1.8  | Leaf1-1 |Eth2    | 10.10.1.9 | 10.10.1.8/31  |
+| Spine2 | Eth2   | 10.10.1.10  | Leaf1-2 |Eth2    | 10.10.1.11 | 10.10.1.10/31  |
+| Spine2 | Eth3   | 10.10.1.12  | Leaf2-1 |Eth2    | 10.10.1.13| 10.10.1.12/31   |
+| Spine2 | Eth4   | 10.10.1.14  | Leaf2-2 |Eth2    | 10.10.1.15| 10.10.1.14/31   |
 
-Адреса клиентов:
-| Клиент  | Адрес клиента     | Сеть         | VLAN ID | VNI |
-|---------|------------|--------------|---------|------|
-| Client1 | 10.22.1.11 | 10.22.1.0/24 | 221 | 10221 |
-| Client2 | 10.22.2.12 | 10.22.1.0/24 | 222 | 10222 |
+**Адреса Loopback'ов:**
+
+| Свитч  | Адрес Lo0  | Адрес lo1 | Адрес lo100 | Адрес lo100 sec |
+|--------|------------|-----------|-------------|-----------------|
+| Spine1 | 192.168.10.1 | 192.168.10.2 |  
+| Spine2 | 192.168.10.3 | 192.168.10.4 |  
+| Leaf1-1  | 192.168.10.5 | 192.168.10.6 | 192.168.10.7 | 192.168.10.111 | 
+| Leaf1-2  | 192.168.10.8 | 192.168.10.9  | 192.168.10.10 | 192.168.10.111 |
+| Leaf2-1  | 192.168.10.11 | 192.168.10.12 | 192.168.10.13 | 192.168.10.112 |
+| Leaf2-2  | 192.168.10.14 | 192.168.10.15 | 192.168.10.16 | 192.168.10.112 |
+|   FW   | 8.8.8.8
 
 
-Адреса loopback интерфейсов:
-| Узел сети | Адрес Lo0 | Адрес Lo1 | Lo1 secondary |
-|-----------|-----------|-----------|---|
-| Spine1    |     192.168.110.1      | |
-| Leaf1    |      192.168.110.5     | 192.168.110.6 | 192.168.110.200 |
-| Leaf2    |      192.168.110.8     | 192.168.110.9 | 192.168.110.200|
-| Leaf3    |      192.168.110.11     | 192.168.110.12 | |
+### 1. Настройка MLAG
 
-keep-alive link
-| Узел | Порт | Адрес |
-|------|------|-------|
-| Leaf1 | Eth1/4 | 10.1.1.0/31 |
-| Leaf2 | Eth1/4 | 10.1.1.1/31 |
+interface eth3-4
 
- **Схема сети**
- 
- ![Схема сети](./images/lab7-1.PNG)
+*включаем LACP*
 
- **Настройка VPC**
+channel-group 10 mode active
+
+*Добавляем интерфейсы в port channel 10*
+
+interface port-channel 10
+
+switchport mode trunk
+
+*создаем VLAN с неиспользуемым идентификатором vlan для связи между узлами MLAG*
+
+vlan 4094
+
+*добавляем vlan 4094 и port-channel 10 в группу mlagpeer, т.о. vlan 4094 может передаваться только по port-channel 10*
+
+trunk group mlagpeer
+
+interface port-channel 10
+
+switchport trunk group mlagpeer
+
+*Это позволяет безопасно отключить Spanning-Tree*
+
+no spanning-tree vlan 4094
+
+*настроим ip адрес на vlan 4094*
+
+*leaf1-1*
+
+int vlan 4094
+
+ip address 10.0.0.1/30
+
+*leaf1-2*
+
+int vlan 4094
+
+ip address 10.0.0.2/30
+
+*настроим mlag*
+
+*leaf1-1*
 
 ```
-! На leaf1 и leaf2
-! Создаем vrf keepalive
+mlag configuration
+   domain-id mlag1
+   local-interface Vlan4094
+   peer-address 10.0.0.2
+   peer-link Port-Channel10
+```
+*leaf1-2*
 
-vrf context keepalive
+```
+mlag configuration
+   domain-id mlag1
+   local-interface Vlan4094
+   peer-address 10.0.0.1
+   peer-link Port-Channel10
+```
 
-! Настраиваем интерфейс для keepalive
+*настроим port-channel с SW1*
 
-interface Ethernet1/4
-no switchport
-vrf member keepalive
-ip address <IP-адрес из таблицы>
-no shutdown
+*на leaf1-1 и leaf1-2*
 
-! Создаем vpc
+interface Port-Channel30
 
-vpc domain 10
-
-! Задаем приоритет, чем меньше число, тем выше приоритет
-
-role priority <число, на одном из свитчей больше, чем на другом>
-
-! Указываем адрес для проверки доступности второго узла
-peer-keepalive destination <IP Eth1/4 второго свитча> source <IP Eth1/4 свичта на котром проводим настройку> vrf keepalive
-
-! Настраиваем оба vPC узла в качестве root bridge для Spanning Tree
-
-peer-switch
-
-! Включаем задержку восстановления после сбоя
-
-delay restore 10
-
-! Настраиваем Peer Link для передачи управляющего трафика
-
-interface ethernet 1/2-3
-no shutdown
-channel-group 20 mode active
-
-! Настраиваем port channel используемый для Peer Link
-
-interface port-channel 20
-no shutdown
 switchport mode trunk
-vpc peer-link
 
-! Настраиваем агрегированный интерфейс на двух свитчах для подключения клиента
-! В качстве клиента используем свитч SW с настроенным link aggregation и подключенным к свитчу компьютером
+mlag 1
 
-interface port-channel30
-switchport mode trunk
-vpc 30
+interface Ethernet6
 
-interface Ethernet1/5
-switchport mode trunk
 channel-group 30 mode active
 
-```
-Для проверки используем команды
+*на SW1*
 
-```
-! на коммутаторах
-show vpc
-show vpc role
+interface Port-Channel30
 
-! на клиентах
-ping
+switchport mode trunk
 
-```
+interface Ethernet1-2
 
-Клиенты видят друг друга:
+channel-group 30 mode active
 
-![Вывод команды ping](./images/lab7-2.PNG)
+switchport mode trunk
 
-vPC включен и работает:
 
-![Вывод команды show vpc](./images/lab7-3.PNG)
+**Проверяем работу MLAG**
 
-На leaf1 и leaf2 одинаковый system mac
+![](images/mlag.jpg)
 
-![Вывод команды show vpc role](./images/lab7-4.PNG)
+**Проверяем, что клиенты видят друг друга**
 
-![Вывод команды show vpc role](./images/lab7-5.PNG)
+![](images/ping_fab.jpg)
+
+
+![](images/fw_ping.jpg)
+
+**проверим, что клиенту внутри фабрики доступен Clent1 за ее пределами и адрес 8.8.8.8, эмулирующий подключение к интернету**
+
+![](images/ping_8.jpg)
+
 
 <details>
-<summary>Конфигурация Spine1</summary>
+<summary>Полный конфиг Spine1</summary>
 <pre><code>
-!Command: show running-config
-!Running configuration last done at: Tue Sep 12 17:31:16 2023
-!Time: Tue Sep 12 18:20:34 2023
-
-version 9.2(2) Bios:version
-switchname spine1
-vdc spine1 id 1
-  limit-resource vlan minimum 16 maximum 4094
-  limit-resource vrf minimum 2 maximum 4096
-  limit-resource port-channel minimum 0 maximum 511
-  limit-resource u4route-mem minimum 248 maximum 248
-  limit-resource u6route-mem minimum 96 maximum 96
-  limit-resource m4route-mem minimum 58 maximum 58
-  limit-resource m6route-mem minimum 8 maximum 8
-
-no feature ssh
-feature telnet
-cfs eth distribute
-nv overlay evpn
-feature bgp
-feature fabric forwarding
-feature interface-vlan
-feature vn-segment-vlan-based
-feature nv overlay
-
-no password strength-check
-username admin password 5 $5$HGKFII$ynhW3AhV/xGJ7b9ZyS.8t1zQx2PKwTRg6ypjlUVW0m9
- role network-admin
-ip domain-lookup
-copp profile strict
-snmp-server user admin network-admin auth md5 0x60fb4ae284b0f0f0511c95429ee54d0b
- priv 0x60fb4ae284b0f0f0511c95429ee54d0b localizedkey
-rmon event 1 description FATAL(1) owner PMON@FATAL
-rmon event 2 description CRITICAL(2) owner PMON@CRITICAL
-rmon event 3 description ERROR(3) owner PMON@ERROR
-rmon event 4 description WARNING(4) owner PMON@WARNING
-rmon event 5 description INFORMATION(5) owner PMON@INFO
-
-vlan 1
-
-route-map RM-LOOPBACK permit 10
-  match interface loopback0
-route-map RM-NHU permit 10
-  set ip next-hop unchanged
-vrf context management
-
-
-interface Vlan1
-
-interface Ethernet1/1
-  no switchport
-  mtu 9216
-  ip address 10.110.1.0/31
-  no shutdown
-
-interface Ethernet1/2
-  no switchport
-  mtu 9216
-  ip address 10.110.1.2/31
-  no shutdown
-
-interface Ethernet1/3
-  no switchport
-  mtu 9216
-  ip address 10.110.1.4/31
-  no shutdown
-
-interface Ethernet1/4
-
-interface Ethernet1/5
-
-interface Ethernet1/6
-
-interface Ethernet1/7
-
-interface Ethernet1/8
-
-interface Ethernet1/9
-
-interface Ethernet1/10
-
-interface Ethernet1/11
-
-interface Ethernet1/12
-
-interface Ethernet1/13
-
-interface Ethernet1/14
-
-interface Ethernet1/15
-
-interface Ethernet1/16
-
-interface Ethernet1/17
-
-interface Ethernet1/18
-
-interface Ethernet1/19
-
-interface Ethernet1/20
-
-interface Ethernet1/21
-
-interface Ethernet1/22
-
-interface Ethernet1/23
-
-interface Ethernet1/24
-
-interface Ethernet1/25
-
-interface Ethernet1/26
-
-interface Ethernet1/27
-
-interface Ethernet1/28
-
-interface Ethernet1/29
-
-interface Ethernet1/30
-
-interface Ethernet1/31
-
-interface Ethernet1/32
-
-interface Ethernet1/33
-
-interface Ethernet1/34
-
-interface Ethernet1/35
-
-interface Ethernet1/36
-
-interface Ethernet1/37
-
-interface Ethernet1/38
-
-interface Ethernet1/39
-
-interface Ethernet1/40
-
-interface Ethernet1/41
-
-interface Ethernet1/42
-
-interface Ethernet1/43
-
-interface Ethernet1/44
-
-interface Ethernet1/45
-
-interface Ethernet1/46
-
-interface Ethernet1/47
-
-interface Ethernet1/48
-
-interface Ethernet1/49
-
-interface Ethernet1/50
-
-interface Ethernet1/51
-
-interface Ethernet1/52
-
-interface Ethernet1/53
-
-interface Ethernet1/54
-
-interface Ethernet1/55
-
-interface Ethernet1/56
-
-interface Ethernet1/57
-
-interface Ethernet1/58
-
-interface Ethernet1/59
-
-interface Ethernet1/60
-
-interface Ethernet1/61
-
-interface Ethernet1/62
-
-interface Ethernet1/63
-
-interface Ethernet1/64
-
-interface Ethernet1/65
-
-interface Ethernet1/66
-
-interface Ethernet1/67
-
-interface Ethernet1/68
-
-interface Ethernet1/69
-
-interface Ethernet1/70
-
-interface Ethernet1/71
-
-interface Ethernet1/72
-
-interface Ethernet1/73
-
-interface Ethernet1/74
-
-interface Ethernet1/75
-
-interface Ethernet1/76
-
-interface Ethernet1/77
-
-interface Ethernet1/78
-
-interface Ethernet1/79
-
-interface Ethernet1/80
-
-interface Ethernet1/81
-
-interface Ethernet1/82
-
-interface Ethernet1/83
-
-interface Ethernet1/84
-
-interface Ethernet1/85
-
-interface Ethernet1/86
-
-interface Ethernet1/87
-
-interface Ethernet1/88
-
-interface Ethernet1/89
-
-interface Ethernet1/90
-
-interface Ethernet1/91
-
-interface Ethernet1/92
-
-interface Ethernet1/93
-
-interface Ethernet1/94
-
-interface Ethernet1/95
-
-interface Ethernet1/96
-
-interface Ethernet1/97
-
-interface Ethernet1/98
-
-interface Ethernet1/99
-
-interface Ethernet1/100
-
-interface Ethernet1/101
-
-interface Ethernet1/102
-
-interface Ethernet1/103
-
-interface Ethernet1/104
-
-interface Ethernet1/105
-
-interface Ethernet1/106
-
-interface Ethernet1/107
-
-interface Ethernet1/108
-
-interface Ethernet1/109
-
-interface Ethernet1/110
-
-interface Ethernet1/111
-
-interface Ethernet1/112
-
-interface Ethernet1/113
-
-interface Ethernet1/114
-
-interface Ethernet1/115
-
-interface Ethernet1/116
-
-interface Ethernet1/117
-
-interface Ethernet1/118
-
-interface Ethernet1/119
-
-interface Ethernet1/120
-
-interface Ethernet1/121
-
-interface Ethernet1/122
-
-interface Ethernet1/123
-
-interface Ethernet1/124
-
-interface Ethernet1/125
-
-interface Ethernet1/126
-
-interface Ethernet1/127
-
-interface Ethernet1/128
-
-interface mgmt0
-  vrf member management
-
-interface loopback0
-  ip address 192.168.110.1/32
-line console
-line vty
-boot nxos bootflash:/nxos.9.2.2.bin
-router bgp 65000
-  router-id 192.168.110.1
-  address-family ipv4 unicast
-    redistribute direct route-map RM-LOOPBACK
-  address-family l2vpn evpn
-    retain route-target all
-  neighbor 10.110.1.1
-    remote-as 65001
-    address-family ipv4 unicast
-  neighbor 10.110.1.3
-    remote-as 65002
-    address-family ipv4 unicast
-  neighbor 10.110.1.5
-    remote-as 65003
-    address-family ipv4 unicast
-  neighbor 192.168.110.5
-    remote-as 65001
-    update-source loopback0
-    ebgp-multihop 2
-    address-family l2vpn evpn
-      send-community
-      send-community extended
-      route-map RM-NHU out
-  neighbor 192.168.110.8
-    remote-as 65002
-    update-source loopback0
-    ebgp-multihop 2
-    address-family l2vpn evpn
-      send-community
-      send-community extended
-      route-map RM-NHU out
-  neighbor 192.168.110.11
-    remote-as 65003
-    update-source loopback0
-    ebgp-multihop 2
-    address-family l2vpn evpn
-      send-community
-      send-community extended
-      route-map RM-NHU out
-
-</code></pre>
-</details>
-
-<details>
-<summary>Конфигурация Leaf1</summary>
-<pre><code>
-!Command: show running-config
-!Running configuration last done at: Tue Sep 12 18:16:53 2023
-!Time: Tue Sep 12 18:17:38 2023
-
-version 9.2(2) Bios:version
-switchname leaf1
-vdc leaf1 id 1
-  limit-resource vlan minimum 16 maximum 4094
-  limit-resource vrf minimum 2 maximum 4096
-  limit-resource port-channel minimum 0 maximum 511
-  limit-resource u4route-mem minimum 248 maximum 248
-  limit-resource u6route-mem minimum 96 maximum 96
-  limit-resource m4route-mem minimum 58 maximum 58
-  limit-resource m6route-mem minimum 8 maximum 8
-
-no feature ssh
-feature telnet
-cfs eth distribute
-nv overlay evpn
-feature bgp
-feature fabric forwarding
-feature interface-vlan
-feature vn-segment-vlan-based
-feature lacp
-feature vpc
-feature nv overlay
-
-no password strength-check
-username admin password 5 $5$JMMFHA$My4Bz5GeOH2h9iaj9Xyq.QjGf8eXyiqPC5g2Ja25rj0
- role network-admin
-ip domain-lookup
-copp profile strict
-snmp-server user admin network-admin auth md5 0x842513228c8296cb56d32aa77c5c91ed
- priv 0x842513228c8296cb56d32aa77c5c91ed localizedkey
-rmon event 1 description FATAL(1) owner PMON@FATAL
-rmon event 2 description CRITICAL(2) owner PMON@CRITICAL
-rmon event 3 description ERROR(3) owner PMON@ERROR
-rmon event 4 description WARNING(4) owner PMON@WARNING
-rmon event 5 description INFORMATION(5) owner PMON@INFO
-
-fabric forwarding anycast-gateway-mac 0000.0000.0001
-vlan 1,100,221-222
-vlan 100
-  vn-segment 10100
-vlan 221
-  vn-segment 10221
-vlan 222
-  vn-segment 10222
-
-route-map RM-LOOPBACK permit 10
-  match interface loopback0 loopback1
-vrf context TEST
-  vni 10100
-  rd 192.168.110.5:100
-  address-family ipv4 unicast
-    route-target import 100:100
-    route-target import 100:100 evpn
-    route-target export 100:100
-    route-target export 100:100 evpn
-vrf context keepalive
-vrf context management
-vpc domain 10
-  peer-switch
-  role priority 10
-  peer-keepalive destination 10.1.1.1 source 10.1.1.0 vrf keepalive
-  delay restore 10
-  ip arp synchronize
-
-
-interface Vlan1
-
-interface Vlan100
-  no shutdown
-  vrf member TEST
-  ip forward
-
-interface Vlan221
-  no shutdown
-  vrf member TEST
-  ip address 10.22.1.1/24
-  fabric forwarding mode anycast-gateway
-
-interface Vlan222
-  no shutdown
-  vrf member TEST
-  ip address 10.22.2.1/24
-  fabric forwarding mode anycast-gateway
-
-interface port-channel20
-  switchport mode trunk
-  spanning-tree port type network
-  vpc peer-link
-
-interface port-channel30
-  switchport mode trunk
-  vpc 30
-
-interface nve1
-  no shutdown
-  host-reachability protocol bgp
-  source-interface loopback1
-  global ingress-replication protocol bgp
-  member vni 10100 associate-vrf
-  member vni 10221
-  member vni 10222
-
-interface Ethernet1/1
-  no switchport
-  mtu 9216
-  ip address 10.110.1.1/31
-  no shutdown
-
-interface Ethernet1/2
-  switchport mode trunk
-  channel-group 20 mode active
-
-interface Ethernet1/3
-  switchport mode trunk
-  channel-group 20 mode active
-
-interface Ethernet1/4
-  no switchport
-  vrf member keepalive
-  ip address 10.1.1.0/31
-  no shutdown
-
-interface Ethernet1/5
-  switchport mode trunk
-  channel-group 30 mode active
-
-interface Ethernet1/6
-
-interface Ethernet1/7
-
-interface Ethernet1/8
-
-interface Ethernet1/9
-
-interface Ethernet1/10
-
-interface Ethernet1/11
-
-interface Ethernet1/12
-
-interface Ethernet1/13
-
-interface Ethernet1/14
-
-interface Ethernet1/15
-
-interface Ethernet1/16
-
-interface Ethernet1/17
-
-interface Ethernet1/18
-
-interface Ethernet1/19
-
-interface Ethernet1/20
-
-interface Ethernet1/21
-
-interface Ethernet1/22
-
-interface Ethernet1/23
-
-interface Ethernet1/24
-
-interface Ethernet1/25
-
-interface Ethernet1/26
-
-interface Ethernet1/27
-
-interface Ethernet1/28
-
-interface Ethernet1/29
-
-interface Ethernet1/30
-
-interface Ethernet1/31
-
-interface Ethernet1/32
-
-interface Ethernet1/33
-
-interface Ethernet1/34
-
-interface Ethernet1/35
-
-interface Ethernet1/36
-
-interface Ethernet1/37
-
-interface Ethernet1/38
-
-interface Ethernet1/39
-
-interface Ethernet1/40
-
-interface Ethernet1/41
-
-interface Ethernet1/42
-
-interface Ethernet1/43
-
-interface Ethernet1/44
-
-interface Ethernet1/45
-
-interface Ethernet1/46
-
-interface Ethernet1/47
-
-interface Ethernet1/48
-
-interface Ethernet1/49
-
-interface Ethernet1/50
-
-interface Ethernet1/51
-
-interface Ethernet1/52
-
-interface Ethernet1/53
-
-interface Ethernet1/54
-
-interface Ethernet1/55
-
-interface Ethernet1/56
-
-interface Ethernet1/57
-
-interface Ethernet1/58
-
-interface Ethernet1/59
-
-interface Ethernet1/60
-
-interface Ethernet1/61
-
-interface Ethernet1/62
-
-interface Ethernet1/63
-
-interface Ethernet1/64
-
-interface Ethernet1/65
-
-interface Ethernet1/66
-
-interface Ethernet1/67
-
-interface Ethernet1/68
-
-interface Ethernet1/69
-
-interface Ethernet1/70
-
-interface Ethernet1/71
-
-interface Ethernet1/72
-
-interface Ethernet1/73
-
-interface Ethernet1/74
-
-interface Ethernet1/75
-
-interface Ethernet1/76
-
-interface Ethernet1/77
-
-interface Ethernet1/78
-
-interface Ethernet1/79
-
-interface Ethernet1/80
-
-interface Ethernet1/81
-
-interface Ethernet1/82
-
-interface Ethernet1/83
-
-interface Ethernet1/84
-
-interface Ethernet1/85
-
-interface Ethernet1/86
-
-interface Ethernet1/87
-
-interface Ethernet1/88
-
-interface Ethernet1/89
-
-interface Ethernet1/90
-
-interface Ethernet1/91
-
-interface Ethernet1/92
-
-interface Ethernet1/93
-
-interface Ethernet1/94
-
-interface Ethernet1/95
-
-interface Ethernet1/96
-
-interface Ethernet1/97
-
-interface Ethernet1/98
-
-interface Ethernet1/99
-
-interface Ethernet1/100
-
-interface Ethernet1/101
-
-interface Ethernet1/102
-
-interface Ethernet1/103
-
-interface Ethernet1/104
-
-interface Ethernet1/105
-
-interface Ethernet1/106
-
-interface Ethernet1/107
-
-interface Ethernet1/108
-
-interface Ethernet1/109
-
-interface Ethernet1/110
-
-interface Ethernet1/111
-
-interface Ethernet1/112
-
-interface Ethernet1/113
-
-interface Ethernet1/114
-
-interface Ethernet1/115
-
-interface Ethernet1/116
-
-interface Ethernet1/117
-
-interface Ethernet1/118
-
-interface Ethernet1/119
-
-interface Ethernet1/120
-
-interface Ethernet1/121
-
-interface Ethernet1/122
-
-interface Ethernet1/123
-
-interface Ethernet1/124
-
-interface Ethernet1/125
-
-interface Ethernet1/126
-
-interface Ethernet1/127
-
-interface Ethernet1/128
-
-interface mgmt0
-  vrf member management
-
-interface loopback0
-  ip address 192.168.110.5/32
-
-interface loopback1
-  ip address 192.168.110.6/32
-  ip address 192.168.110.200/32 secondary
-line console
-line vty
-boot nxos bootflash:/nxos.9.2.2.bin
-router bgp 65001
-  router-id 192.168.110.5
-  address-family ipv4 unicast
-    redistribute direct route-map RM-LOOPBACK
-  neighbor 10.110.1.0
-    remote-as 65000
-    address-family ipv4 unicast
-  neighbor 192.168.110.1
-    remote-as 65000
-    update-source loopback0
-    ebgp-multihop 2
-    address-family l2vpn evpn
-      send-community
-      send-community extended
-evpn
-  vni 10221 l2
-    rd 192.168.110.5:10221
-    route-target import auto
-    route-target export auto
-  vni 10222 l2
-    rd 192.168.110.5:10222
-    route-target import auto
-    route-target export auto
-
-</code></pre>
-</details>
-
-<details>
-<summary>Конфигурация Leaf2</summary>
-<pre><code>
-!Command: show running-config
-!Running configuration last done at: Tue Sep 12 18:16:49 2023
-!Time: Tue Sep 12 18:24:20 2023
-
-version 9.2(2) Bios:version
-switchname leaf2
-vdc leaf2 id 1
-  limit-resource vlan minimum 16 maximum 4094
-  limit-resource vrf minimum 2 maximum 4096
-  limit-resource port-channel minimum 0 maximum 511
-  limit-resource u4route-mem minimum 248 maximum 248
-  limit-resource u6route-mem minimum 96 maximum 96
-  limit-resource m4route-mem minimum 58 maximum 58
-  limit-resource m6route-mem minimum 8 maximum 8
-
-no feature ssh
-feature telnet
-cfs eth distribute
-nv overlay evpn
-feature bgp
-feature fabric forwarding
-feature interface-vlan
-feature vn-segment-vlan-based
-feature lacp
-feature vpc
-feature nv overlay
-
-no password strength-check
-username admin password 5 $5$JNLMCK$TuS9LxzhIYQmDqOwodvuSq2kEWtOYttF89AQ8nl.GTA
- role network-admin
-ip domain-lookup
-copp profile strict
-snmp-server user admin network-admin auth md5 0xa0592966a86174abd3d57ff712f93617
- priv 0xa0592966a86174abd3d57ff712f93617 localizedkey
-rmon event 1 description FATAL(1) owner PMON@FATAL
-rmon event 2 description CRITICAL(2) owner PMON@CRITICAL
-rmon event 3 description ERROR(3) owner PMON@ERROR
-rmon event 4 description WARNING(4) owner PMON@WARNING
-rmon event 5 description INFORMATION(5) owner PMON@INFO
-
-fabric forwarding anycast-gateway-mac 0000.0000.0001
-vlan 1,100,221-222
-vlan 100
-  vn-segment 10100
-vlan 221
-  vn-segment 10221
-vlan 222
-  vn-segment 10222
-
-route-map RM-LOOPBACK permit 10
-  match interface loopback0 loopback1
-vrf context TEST
-  vni 10100
-  rd 192.168.110.8:100
-  address-family ipv4 unicast
-    route-target import 100:100
-    route-target import 100:100 evpn
-    route-target export 100:100
-    route-target export 100:100 evpn
-vrf context keepalive
-vrf context management
-vpc domain 10
-  peer-switch
-  role priority 20
-  peer-keepalive destination 10.1.1.0 source 10.1.1.1 vrf keepalive
-  delay restore 10
-  ip arp synchronize
-
-
-interface Vlan1
-
-interface Vlan100
-  no shutdown
-  vrf member TEST
-  ip forward
-
-interface Vlan221
-  no shutdown
-  vrf member TEST
-  ip address 10.22.1.1/24
-  fabric forwarding mode anycast-gateway
-
-interface Vlan222
-  no shutdown
-  vrf member TEST
-  ip address 10.22.2.1/24
-  fabric forwarding mode anycast-gateway
-
-interface port-channel20
-  switchport mode trunk
-  spanning-tree port type network
-  vpc peer-link
-
-interface port-channel30
-  switchport mode trunk
-  vpc 30
-
-interface nve1
-  no shutdown
-  host-reachability protocol bgp
-  source-interface loopback1
-  global ingress-replication protocol bgp
-  member vni 10100 associate-vrf
-  member vni 10221
-  member vni 10222
-
-interface Ethernet1/1
-  no switchport
-  mtu 9216
-  ip address 10.110.1.3/31
-  no shutdown
-
-interface Ethernet1/2
-  switchport mode trunk
-  channel-group 20 mode active
-
-interface Ethernet1/3
-  switchport mode trunk
-  channel-group 20 mode active
-
-interface Ethernet1/4
-  no switchport
-  vrf member keepalive
-  ip address 10.1.1.1/31
-  no shutdown
-
-interface Ethernet1/5
-  switchport mode trunk
-  channel-group 30 mode active
-
-interface Ethernet1/6
-
-interface Ethernet1/7
-
-interface Ethernet1/8
-
-interface Ethernet1/9
-
-interface Ethernet1/10
-
-interface Ethernet1/11
-
-interface Ethernet1/12
-
-interface Ethernet1/13
-
-interface Ethernet1/14
-
-interface Ethernet1/15
-
-interface Ethernet1/16
-
-interface Ethernet1/17
-
-interface Ethernet1/18
-
-interface Ethernet1/19
-
-interface Ethernet1/20
-
-interface Ethernet1/21
-
-interface Ethernet1/22
-
-interface Ethernet1/23
-
-interface Ethernet1/24
-
-interface Ethernet1/25
-
-interface Ethernet1/26
-
-interface Ethernet1/27
-
-interface Ethernet1/28
-
-interface Ethernet1/29
-
-interface Ethernet1/30
-
-interface Ethernet1/31
-
-interface Ethernet1/32
-
-interface Ethernet1/33
-
-interface Ethernet1/34
-
-interface Ethernet1/35
-
-interface Ethernet1/36
-
-interface Ethernet1/37
-
-interface Ethernet1/38
-
-interface Ethernet1/39
-
-interface Ethernet1/40
-
-interface Ethernet1/41
-
-interface Ethernet1/42
-
-interface Ethernet1/43
-
-interface Ethernet1/44
-
-interface Ethernet1/45
-
-interface Ethernet1/46
-
-interface Ethernet1/47
-
-interface Ethernet1/48
-
-interface Ethernet1/49
-
-interface Ethernet1/50
-
-interface Ethernet1/51
-
-interface Ethernet1/52
-
-interface Ethernet1/53
-
-interface Ethernet1/54
-
-interface Ethernet1/55
-
-interface Ethernet1/56
-
-interface Ethernet1/57
-
-interface Ethernet1/58
-
-interface Ethernet1/59
-
-interface Ethernet1/60
-
-interface Ethernet1/61
-
-interface Ethernet1/62
-
-interface Ethernet1/63
-
-interface Ethernet1/64
-
-interface Ethernet1/65
-
-interface Ethernet1/66
-
-interface Ethernet1/67
-
-interface Ethernet1/68
-
-interface Ethernet1/69
-
-interface Ethernet1/70
-
-interface Ethernet1/71
-
-interface Ethernet1/72
-
-interface Ethernet1/73
-
-interface Ethernet1/74
-
-interface Ethernet1/75
-
-interface Ethernet1/76
-
-interface Ethernet1/77
-
-interface Ethernet1/78
-
-interface Ethernet1/79
-
-interface Ethernet1/80
-
-interface Ethernet1/81
-
-interface Ethernet1/82
-
-interface Ethernet1/83
-
-interface Ethernet1/84
-
-interface Ethernet1/85
-
-interface Ethernet1/86
-
-interface Ethernet1/87
-
-interface Ethernet1/88
-
-interface Ethernet1/89
-
-interface Ethernet1/90
-
-interface Ethernet1/91
-
-interface Ethernet1/92
-
-interface Ethernet1/93
-
-interface Ethernet1/94
-
-interface Ethernet1/95
-
-interface Ethernet1/96
-
-interface Ethernet1/97
-
-interface Ethernet1/98
-
-interface Ethernet1/99
-
-interface Ethernet1/100
-
-interface Ethernet1/101
-
-interface Ethernet1/102
-
-interface Ethernet1/103
-
-interface Ethernet1/104
-
-interface Ethernet1/105
-
-interface Ethernet1/106
-
-interface Ethernet1/107
-
-interface Ethernet1/108
-
-interface Ethernet1/109
-
-interface Ethernet1/110
-
-interface Ethernet1/111
-
-interface Ethernet1/112
-
-interface Ethernet1/113
-
-interface Ethernet1/114
-
-interface Ethernet1/115
-
-interface Ethernet1/116
-
-interface Ethernet1/117
-
-interface Ethernet1/118
-
-interface Ethernet1/119
-
-interface Ethernet1/120
-
-interface Ethernet1/121
-
-interface Ethernet1/122
-
-interface Ethernet1/123
-
-interface Ethernet1/124
-
-interface Ethernet1/125
-
-interface Ethernet1/126
-
-interface Ethernet1/127
-
-interface Ethernet1/128
-
-interface mgmt0
-  vrf member management
-
-interface loopback0
-  ip address 192.168.110.8/32
-
-interface loopback1
-  ip address 192.168.110.9/32
-  ip address 192.168.110.200/32 secondary
-line console
-line vty
-boot nxos bootflash:/nxos.9.2.2.bin
-router bgp 65002
-  router-id 192.168.110.8
-  address-family ipv4 unicast
-    redistribute direct route-map RM-LOOPBACK
-  neighbor 10.110.1.2
-    remote-as 65000
-    address-family ipv4 unicast
-  neighbor 192.168.110.1
-    remote-as 65000
-    update-source loopback0
-    ebgp-multihop 2
-    address-family l2vpn evpn
-      send-community
-      send-community extended
-evpn
-  vni 10221 l2
-    rd 192.168.110.8:10221
-    route-target import auto
-    route-target export auto
-  vni 10222 l2
-    rd 192.168.110.8:10222
-    route-target import auto
-    route-target export auto
-
-
-</code></pre>
-</details>
-
-<details>
-<summary>Конфигурация Leaf3</summary>
-<pre><code>
-!Command: show running-config
-!Running configuration last done at: Tue Sep 12 18:16:46 2023
-!Time: Tue Sep 12 18:25:08 2023
-
-version 9.2(2) Bios:version
-switchname leaf3
-vdc leaf3 id 1
-  limit-resource vlan minimum 16 maximum 4094
-  limit-resource vrf minimum 2 maximum 4096
-  limit-resource port-channel minimum 0 maximum 511
-  limit-resource u4route-mem minimum 248 maximum 248
-  limit-resource u6route-mem minimum 96 maximum 96
-  limit-resource m4route-mem minimum 58 maximum 58
-  limit-resource m6route-mem minimum 8 maximum 8
-
-no feature ssh
-feature telnet
-cfs eth distribute
-nv overlay evpn
-feature bgp
-feature fabric forwarding
-feature interface-vlan
-feature vn-segment-vlan-based
-feature lacp
-feature vpc
-feature nv overlay
-
-no password strength-check
-username admin password 5 $5$JAFHHH$5fKp0x0cSJlQzVMYbWDYwl83ISIzURrkYVHO6IYfoc8
- role network-admin
-ip domain-lookup
-copp profile strict
-snmp-server user admin network-admin auth md5 0xa95c3aac410ecd2e60cd349a21f666e8
- priv 0xa95c3aac410ecd2e60cd349a21f666e8 localizedkey
-rmon event 1 description FATAL(1) owner PMON@FATAL
-rmon event 2 description CRITICAL(2) owner PMON@CRITICAL
-rmon event 3 description ERROR(3) owner PMON@ERROR
-rmon event 4 description WARNING(4) owner PMON@WARNING
-rmon event 5 description INFORMATION(5) owner PMON@INFO
-
-fabric forwarding anycast-gateway-mac 0000.0000.0001
-vlan 1,100,221-222
-vlan 100
-  vn-segment 10100
-vlan 221
-  vn-segment 10221
-vlan 222
-  vn-segment 10222
-
-route-map RM-LOOPBACK permit 10
-  match interface loopback0 loopback1
-vrf context TEST
-  vni 10100
-  rd 192.168.110.11:100
-  address-family ipv4 unicast
-    route-target import 100:100
-    route-target import 100:100 evpn
-    route-target export 100:100
-    route-target export 100:100 evpn
-vrf context management
-
-
-interface Vlan1
-
-interface Vlan100
-  no shutdown
-  vrf member TEST
-  ip forward
-
-interface Vlan221
-  no shutdown
-  vrf member TEST
-  ip address 10.22.1.1/24
-  fabric forwarding mode anycast-gateway
-
-interface Vlan222
-  no shutdown
-  vrf member TEST
-  ip address 10.22.2.1/24
-  fabric forwarding mode anycast-gateway
-
-interface nve1
-  no shutdown
-  host-reachability protocol bgp
-  source-interface loopback1
-  global ingress-replication protocol bgp
-  member vni 10100 associate-vrf
-  member vni 10221
-  member vni 10222
-
-interface Ethernet1/1
-  no switchport
-  mtu 9216
-  ip address 10.110.1.5/31
-  no shutdown
-
-interface Ethernet1/2
-  switchport access vlan 222
-
-interface Ethernet1/3
-
-interface Ethernet1/4
-
-interface Ethernet1/5
-
-interface Ethernet1/6
-
-interface Ethernet1/7
-
-interface Ethernet1/8
-
-interface Ethernet1/9
-
-interface Ethernet1/10
-
-interface Ethernet1/11
-
-interface Ethernet1/12
-
-interface Ethernet1/13
-
-interface Ethernet1/14
-
-interface Ethernet1/15
-
-interface Ethernet1/16
-
-interface Ethernet1/17
-
-interface Ethernet1/18
-
-interface Ethernet1/19
-
-interface Ethernet1/20
-
-interface Ethernet1/21
-
-interface Ethernet1/22
-
-interface Ethernet1/23
-
-interface Ethernet1/24
-
-interface Ethernet1/25
-
-interface Ethernet1/26
-
-interface Ethernet1/27
-
-interface Ethernet1/28
-
-interface Ethernet1/29
-
-interface Ethernet1/30
-
-interface Ethernet1/31
-
-interface Ethernet1/32
-
-interface Ethernet1/33
-
-interface Ethernet1/34
-
-interface Ethernet1/35
-
-interface Ethernet1/36
-
-interface Ethernet1/37
-
-interface Ethernet1/38
-
-interface Ethernet1/39
-
-interface Ethernet1/40
-
-interface Ethernet1/41
-
-interface Ethernet1/42
-
-interface Ethernet1/43
-
-interface Ethernet1/44
-
-interface Ethernet1/45
-
-interface Ethernet1/46
-
-interface Ethernet1/47
-
-interface Ethernet1/48
-
-interface Ethernet1/49
-
-interface Ethernet1/50
-
-interface Ethernet1/51
-
-interface Ethernet1/52
-
-interface Ethernet1/53
-
-interface Ethernet1/54
-
-interface Ethernet1/55
-
-interface Ethernet1/56
-
-interface Ethernet1/57
-
-interface Ethernet1/58
-
-interface Ethernet1/59
-
-interface Ethernet1/60
-
-interface Ethernet1/61
-
-interface Ethernet1/62
-
-interface Ethernet1/63
-
-interface Ethernet1/64
-
-interface Ethernet1/65
-
-interface Ethernet1/66
-
-interface Ethernet1/67
-
-interface Ethernet1/68
-
-interface Ethernet1/69
-
-interface Ethernet1/70
-
-interface Ethernet1/71
-
-interface Ethernet1/72
-
-interface Ethernet1/73
-
-interface Ethernet1/74
-
-interface Ethernet1/75
-
-interface Ethernet1/76
-
-interface Ethernet1/77
-
-interface Ethernet1/78
-
-interface Ethernet1/79
-
-interface Ethernet1/80
-
-interface Ethernet1/81
-
-interface Ethernet1/82
-
-interface Ethernet1/83
-
-interface Ethernet1/84
-
-interface Ethernet1/85
-
-interface Ethernet1/86
-
-interface Ethernet1/87
-
-interface Ethernet1/88
-
-interface Ethernet1/89
-
-interface Ethernet1/90
-
-interface Ethernet1/91
-
-interface Ethernet1/92
-
-interface Ethernet1/93
-
-interface Ethernet1/94
-
-interface Ethernet1/95
-
-interface Ethernet1/96
-
-interface Ethernet1/97
-
-interface Ethernet1/98
-
-interface Ethernet1/99
-
-interface Ethernet1/100
-
-interface Ethernet1/101
-
-interface Ethernet1/102
-
-interface Ethernet1/103
-
-interface Ethernet1/104
-
-interface Ethernet1/105
-
-interface Ethernet1/106
-
-interface Ethernet1/107
-
-interface Ethernet1/108
-
-interface Ethernet1/109
-
-interface Ethernet1/110
-
-interface Ethernet1/111
-
-interface Ethernet1/112
-
-interface Ethernet1/113
-
-interface Ethernet1/114
-
-interface Ethernet1/115
-
-interface Ethernet1/116
-
-interface Ethernet1/117
-
-interface Ethernet1/118
-
-interface Ethernet1/119
-
-interface Ethernet1/120
-
-interface Ethernet1/121
-
-interface Ethernet1/122
-
-interface Ethernet1/123
-
-interface Ethernet1/124
-
-interface Ethernet1/125
-
-interface Ethernet1/126
-
-interface Ethernet1/127
-
-interface Ethernet1/128
-
-interface mgmt0
-  vrf member management
-
-interface loopback0
-  ip address 192.168.110.11/32
-
-interface loopback1
-  ip address 192.168.110.12/32
-line console
-line vty
-boot nxos bootflash:/nxos.9.2.2.bin
-router bgp 65003
-  router-id 192.168.110.11
-  address-family ipv4 unicast
-    redistribute direct route-map RM-LOOPBACK
-  neighbor 10.110.1.4
-    remote-as 65000
-    address-family ipv4 unicast
-  neighbor 192.168.110.1
-    remote-as 65000
-    update-source loopback0
-    ebgp-multihop 2
-    address-family l2vpn evpn
-      send-community
-      send-community extended
-evpn
-  vni 10221 l2
-    rd 192.168.110.11:10221
-    route-target import auto
-    route-target export auto
-  vni 10222 l2
-    rd 192.168.110.11:10222
-    route-target import auto
-    route-target export auto
-
-
-</code></pre>
-</details>
-
-<details>
-<summary>Настройка SW</summary>
-<pre><code>
+Spine1(config)#sh run
 ! Command: show running-config
-! device: SW (vEOS-lab, EOS-4.26.4M)
+! device: Spine1 (vEOS-lab, EOS-4.26.4M)
 !
 ! boot system flash:/vEOS-lab.swi
 !
@@ -1750,25 +170,1024 @@ transceiver qsfp default-mode 4x10G
 !
 service routing protocols model multi-agent
 !
-hostname SW
+hostname Spine1
 !
 spanning-tree mode mstp
 !
-vlan 221
+clock timezone Europe/Moscow
+!
+interface Ethernet1
+   no switchport
+   ip address 10.10.1.0/31
+   ip ospf network point-to-point
+!
+interface Ethernet2
+   no switchport
+   ip address 10.10.1.2/31
+   ip ospf network point-to-point
+!
+interface Ethernet3
+   no switchport
+   ip address 10.10.1.4/31
+   ip ospf network point-to-point
+!
+interface Ethernet4
+   no switchport
+   ip address 10.10.1.6/31
+   ip ospf network point-to-point
+!
+interface Ethernet5
+!
+interface Ethernet6
+!
+interface Ethernet7
+!
+interface Ethernet8
+!
+interface Loopback0
+   description OSPF-Router-ID
+   ip address 192.168.10.1/32
+!
+interface Loopback1
+   description BGP-Router-ID
+   ip address 192.168.10.2/32
+!
+interface Management1
+!
+ip routing
+!
+mpls ip
+!
+router bgp 65000
+   router-id 192.168.10.2
+   maximum-paths 16
+   neighbor leaf peer group
+   neighbor leaf remote-as 65000
+   neighbor leaf update-source Loopback1
+   neighbor leaf route-reflector-client
+   neighbor leaf send-community
+   neighbor 192.168.10.6 peer group leaf
+   neighbor 192.168.10.9 peer group leaf
+   neighbor 192.168.10.12 peer group leaf
+   neighbor 192.168.10.15 peer group leaf
+   !
+   address-family evpn
+      neighbor leaf activate
+   !
+   address-family ipv4
+      no neighbor leaf activate
+!
+router ospf 1
+   router-id 192.168.10.1
+   network 10.10.1.0/32 area 0.0.0.0
+   network 10.10.1.2/32 area 0.0.0.0
+   network 10.10.1.4/32 area 0.0.0.0
+   network 10.10.1.6/32 area 0.0.0.0
+   network 192.168.10.1/32 area 0.0.0.0
+   network 192.168.10.2/32 area 0.0.0.0
+   max-lsa 12000
+   maximum-paths 16
+!
+end
+</code></pre>
+</details>
+
+<details>
+<summary>Полный конфиг Spine2</summary>
+<pre><code>
+Spine2(config)#sh run
+! Command: show running-config
+! device: Spine2 (vEOS-lab, EOS-4.26.4M)
+!
+! boot system flash:/vEOS-lab.swi
+!
+no aaa root
+!
+transceiver qsfp default-mode 4x10G
+!
+service routing protocols model multi-agent
+!
+hostname Spine2
+!
+spanning-tree mode mstp
+!
+clock timezone Europe/Moscow
+!
+interface Ethernet1
+   no switchport
+   ip address 10.10.1.8/31
+   ip ospf network point-to-point
+!
+interface Ethernet2
+   no switchport
+   ip address 10.10.1.10/31
+   ip ospf network point-to-point
+!
+interface Ethernet3
+   no switchport
+   ip address 10.10.1.12/31
+   ip ospf network point-to-point
+!
+interface Ethernet4
+   no switchport
+   ip address 10.10.1.14/31
+   ip ospf network point-to-point
+!
+interface Ethernet5
+!
+interface Ethernet6
+!
+interface Ethernet7
+!
+interface Ethernet8
+!
+interface Loopback0
+   description OSPF-Router-ID
+   ip address 192.168.10.3/32
+!
+interface Loopback1
+   description BGP-Router-ID
+   ip address 192.168.10.4/32
+!
+interface Management1
+!
+ip routing
+!
+router bgp 65000
+   router-id 192.168.10.4
+   maximum-paths 16
+   neighbor leaf peer group
+   neighbor leaf remote-as 65000
+   neighbor leaf update-source Loopback1
+   neighbor leaf route-reflector-client
+   neighbor leaf send-community
+   neighbor 192.168.10.6 peer group leaf
+   neighbor 192.168.10.9 peer group leaf
+   neighbor 192.168.10.12 peer group leaf
+   neighbor 192.168.10.15 peer group leaf
+   !
+   address-family evpn
+      neighbor leaf activate
+   !
+   address-family ipv4
+      no neighbor leaf activate
+!
+router ospf 1
+   router-id 192.168.10.3
+   network 10.10.1.8/32 area 0.0.0.0
+   network 10.10.1.10/32 area 0.0.0.0
+   network 10.10.1.12/32 area 0.0.0.0
+   network 10.10.1.14/32 area 0.0.0.0
+   network 192.168.10.3/32 area 0.0.0.0
+   network 192.168.10.4/32 area 0.0.0.0
+   max-lsa 12000
+   maximum-paths 16
+!
+end
+</code></pre>
+</details>
+
+<details>
+<summary>Полный конфиг Leaf1-1</summary>
+<pre><code>
+Leaf1-1(config-router-bgp-vrf-DS)#sh run
+! Command: show running-config
+! device: Leaf1-1 (vEOS-lab, EOS-4.26.4M)
+!
+! boot system flash:/vEOS-lab.swi
+!
+no aaa root
+!
+transceiver qsfp default-mode 4x10G
+!
+service routing protocols model multi-agent
+!
+hostname Leaf1-1
+!
+spanning-tree mode mstp
+no spanning-tree vlan-id 4094
+!
+clock timezone Europe/Moscow
+!
+vlan 10,20,30,40,50,60,70
+!
+vlan 4094
+   trunk group mlagpeer
+!
+vrf instance DS
+!
+interface Port-Channel10
+   switchport mode trunk
+   switchport trunk group mlagpeer
+!
+interface Port-Channel30
+   switchport mode trunk
+   mlag 1
+!
+interface Ethernet1
+   no switchport
+   ip address 10.10.1.1/31
+   ip ospf network point-to-point
+!
+interface Ethernet2
+   no switchport
+   ip address 10.10.1.9/31
+   ip ospf network point-to-point
+!
+interface Ethernet3
+   channel-group 10 mode active
+!
+interface Ethernet4
+   channel-group 10 mode active
+!
+interface Ethernet5
+!
+interface Ethernet6
+   channel-group 30 mode active
+!
+interface Ethernet7
+   switchport access vlan 50
+!
+interface Ethernet8
+!
+interface Loopback0
+   description OSPF-Router-ID
+   ip address 192.168.10.5/32
+!
+interface Loopback1
+   description BGP-Router-ID
+   ip address 192.168.10.6/32
+!
+interface Loopback100
+   ip address 192.168.10.7/32
+   ip address 192.168.10.111/32 secondary
+!
+interface Management1
+!
+interface Vlan50
+   vrf DS
+   ip address virtual 10.1.50.1/24
+!
+interface Vlan60
+   vrf DS
+   ip address virtual 10.1.60.1/24
+!
+interface Vlan70
+   vrf DS
+   ip address virtual 10.100.70.2/24
+!
+interface Vlan4094
+   ip address 10.0.0.1/30
+!
+interface Vxlan1
+   vxlan source-interface Loopback100
+   vxlan udp-port 4789
+   vxlan vlan 10,20,30,40,50,60,70 vni 10010,10020,10030,10040,10050,10060,10070
+   vxlan vrf DS vni 10001
+!
+ip virtual-router mac-address 00:00:22:22:33:33
+!
+ip routing
+ip routing vrf DS
+!
+mlag configuration
+   domain-id mlag1
+   local-interface Vlan4094
+   peer-address 10.0.0.2
+   peer-link Port-Channel10
+!
+ip route vrf DS 0.0.0.0/0 10.100.70.1
+!
+router bgp 65000
+   router-id 192.168.10.6
+   maximum-paths 16
+   neighbor spine peer group
+   neighbor spine remote-as 65000
+   neighbor spine update-source Loopback1
+   neighbor spine send-community
+   neighbor 192.168.10.2 peer group spine
+   neighbor 192.168.10.4 peer group spine
+   !
+   vlan 10
+      rd 192.168.10.6:10010
+      route-target both 1:10010
+      redistribute learned
+   !
+   vlan 20
+      rd 192.168.10.6:10020
+      route-target both 1:10020
+      redistribute learned
+   !
+   vlan 30
+      rd 192.168.10.6:10030
+      route-target both 1:10030
+      redistribute learned
+   !
+   vlan 40
+      rd 192.168.10.6:10040
+      route-target both 1:10040
+      redistribute learned
+   !
+   vlan 50
+      rd 192.168.10.6:10050
+      route-target both 1:10050
+      redistribute learned
+   !
+   vlan 60
+      rd 192.168.10.6:10060
+      route-target both 1:10060
+      redistribute learned
+   !
+   vlan 70
+      rd 192.168.10.6:10070
+      route-target both 1:10070
+      redistribute learned
+   !
+   address-family evpn
+      neighbor spine activate
+   !
+   address-family ipv4
+      no neighbor spine activate
+   !
+   vrf DS
+      rd 192.168.10.6:10001
+      route-target import evpn 1:10001
+      route-target export evpn 1:10001
+      network 10.1.50.0/24
+      network 10.1.60.0/24
+      network 10.100.70.0/24
+      network 0.0.0.0/0
+!
+router ospf 1
+   router-id 192.168.10.5
+   network 10.10.1.1/32 area 0.0.0.0
+   network 10.10.1.9/32 area 0.0.0.0
+   network 192.168.10.5/32 area 0.0.0.0
+   network 192.168.10.6/32 area 0.0.0.0
+   network 192.168.10.7/32 area 0.0.0.0
+   network 192.168.10.111/32 area 0.0.0.0
+   max-lsa 12000
+   maximum-paths 16
+!
+end
+</code></pre>
+</details>
+
+<details>
+<summary>Полный конфиг Leaf1-2</summary>
+<pre><code>
+Leaf1-2(config-router-bgp)#sh run
+! Command: show running-config
+! device: Leaf1-2 (vEOS-lab, EOS-4.26.4M)
+!
+! boot system flash:/vEOS-lab.swi
+!
+no aaa root
+!
+transceiver qsfp default-mode 4x10G
+!
+service routing protocols model multi-agent
+!
+hostname Leaf1-2
+!
+spanning-tree mode mstp
+no spanning-tree vlan-id 4094
+!
+clock timezone Europe/Moscow
+!
+vlan 10,20,30,40,50,60,70
+!
+vlan 4094
+   trunk group mlagpeer
+!
+vrf instance DS
+!
+interface Port-Channel10
+   switchport mode trunk
+   switchport trunk group mlagpeer
+!
+interface Port-Channel30
+   switchport mode trunk
+   mlag 1
+!
+interface Ethernet1
+   no switchport
+   ip address 10.10.1.3/31
+   ip ospf network point-to-point
+!
+interface Ethernet2
+   no switchport
+   ip address 10.10.1.11/31
+   ip ospf network point-to-point
+!
+interface Ethernet3
+   channel-group 10 mode active
+!
+interface Ethernet4
+   channel-group 10 mode active
+!
+interface Ethernet5
+!
+interface Ethernet6
+   channel-group 30 mode active
+!
+interface Ethernet7
+!
+interface Ethernet8
+!
+interface Loopback0
+   description OSPF-Router-ID
+   ip address 192.168.10.8/32
+!
+interface Loopback1
+   description BGP-Router-ID
+   ip address 192.168.10.9/32
+!
+interface Loopback100
+   ip address 192.168.10.10/32
+   ip address 192.168.10.111/32 secondary
+!
+interface Management1
+!
+interface Vlan50
+   vrf DS
+   ip address virtual 10.1.50.1/24
+!
+interface Vlan60
+   vrf DS
+   ip address virtual 10.1.60.1/24
+!
+interface Vlan70
+   vrf DS
+   ip address virtual 10.100.70.2/24
+!
+interface Vlan4094
+   ip address 10.0.0.2/30
+!
+interface Vxlan1
+   vxlan source-interface Loopback100
+   vxlan udp-port 4789
+   vxlan vlan 10,20,30,40,50,60,70 vni 10010,10020,10030,10040,10050,10060,10070
+   vxlan vrf DS vni 10001
+!
+ip virtual-router mac-address 00:00:22:22:33:33
+!
+ip routing
+ip routing vrf DS
+!
+mlag configuration
+   domain-id mlag1
+   local-interface Vlan4094
+   peer-address 10.0.0.1
+   peer-link Port-Channel10
+!
+ip route vrf DS 0.0.0.0/0 10.100.70.1
+!
+router bgp 65000
+   router-id 192.168.10.9
+   maximum-paths 16
+   neighbor spine peer group
+   neighbor spine remote-as 65000
+   neighbor spine update-source Loopback1
+   neighbor spine send-community
+   neighbor 192.168.10.2 peer group spine
+   neighbor 192.168.10.4 peer group spine
+   !
+   vlan 10
+      rd 192.168.10.9:10010
+      route-target both 1:10010
+      redistribute learned
+   !
+   vlan 20
+      rd 192.168.10.9:10020
+      route-target both 1:10020
+      redistribute learned
+   !
+   vlan 30
+      rd 192.168.10.9:10030
+      route-target both 1:10030
+      redistribute learned
+   !
+   vlan 40
+      rd 192.168.10.9:10040
+      route-target both 1:10040
+      redistribute learned
+   !
+   vlan 50
+      rd 192.168.10.9:10050
+      route-target both 1:10050
+      redistribute learned
+   !
+   vlan 60
+      rd 192.168.10.9:10060
+      route-target both 1:10060
+      redistribute learned
+   !
+   vlan 70
+      rd 192.168.10.9:10070
+      route-target both 1:10070
+      redistribute learned
+   !
+   address-family evpn
+      neighbor spine activate
+   !
+   address-family ipv4
+      no neighbor spine activate
+   !
+   vrf DS
+      rd 192.168.10.9:10001
+      route-target import evpn 1:10001
+      route-target export evpn 1:10001
+      network 10.1.50.0/24
+      network 10.1.60.0/24
+      network 10.100.70.0/24
+      network 0.0.0.0/0
+!
+router ospf 1
+   router-id 192.168.10.8
+   network 10.10.1.3/32 area 0.0.0.0
+   network 10.10.1.11/32 area 0.0.0.0
+   network 192.168.10.8/32 area 0.0.0.0
+   network 192.168.10.9/32 area 0.0.0.0
+   network 192.168.10.10/32 area 0.0.0.0
+   network 192.168.10.111/32 area 0.0.0.0
+   max-lsa 12000
+   maximum-paths 16
+!
+end
+</code></pre>
+</details>
+
+<details>
+<summary>конфиг Leaf2-1</summary>
+<pre><code>
+Leaf2-1(config)#sh run
+! Command: show running-config
+! device: Leaf2-1 (vEOS-lab, EOS-4.26.4M)
+!
+! boot system flash:/vEOS-lab.swi
+!
+no aaa root
+!
+transceiver qsfp default-mode 4x10G
+!
+service routing protocols model multi-agent
+!
+hostname Leaf2-1
+!
+spanning-tree mode mstp
+no spanning-tree vlan-id 4094
+!
+clock timezone Europe/Moscow
+!
+vlan 10,20,30,40,50,60,70
+!
+vlan 4094
+   trunk group mlagpeer
+!
+vrf instance DS
+!
+interface Port-Channel20
+   switchport mode trunk
+   switchport trunk group mlagpeer
+!
+interface Ethernet1
+   no switchport
+   ip address 10.10.1.5/31
+   ip ospf network point-to-point
+!
+interface Ethernet2
+   no switchport
+   ip address 10.10.1.13/31
+   ip ospf network point-to-point
+!
+interface Ethernet3
+   channel-group 20 mode active
+!
+interface Ethernet4
+   channel-group 20 mode active
+!
+interface Ethernet5
+!
+interface Ethernet6
+   switchport access vlan 60
+!
+interface Ethernet7
+!
+interface Ethernet8
+!
+interface Loopback0
+   description OSPF-Router-ID
+   ip address 192.168.10.11/32
+!
+interface Loopback1
+   description BGP-Router-ID
+   ip address 192.168.10.12/32
+!
+interface Loopback100
+   ip address 192.168.10.13/32
+   ip address 192.168.10.112/32 secondary
+!
+interface Management1
+!
+interface Vlan50
+   vrf DS
+   ip address virtual 10.1.50.1/24
+!
+interface Vlan60
+   vrf DS
+   ip address virtual 10.1.60.1/24
+!
+interface Vlan70
+   vrf DS
+   ip address virtual 10.100.70.2/24
+!
+interface Vlan4094
+   ip address 10.0.0.5/30
+!
+interface Vxlan1
+   vxlan source-interface Loopback100
+   vxlan udp-port 4789
+   vxlan vlan 10,20,30,40,50,60,70 vni 10010,10020,10030,10040,10050,10060,10070
+   vxlan vrf DS vni 10001
+!
+ip virtual-router mac-address 00:00:22:22:33:33
+!
+ip routing
+ip routing vrf DS
+!
+mlag configuration
+   domain-id mlag2
+   local-interface Vlan4094
+   peer-address 10.0.0.6
+   peer-link Port-Channel20
+!
+router bgp 65000
+   router-id 192.168.10.12
+   maximum-paths 16
+   neighbor spine peer group
+   neighbor spine remote-as 65000
+   neighbor spine update-source Loopback1
+   neighbor spine send-community
+   neighbor 192.168.10.2 peer group spine
+   neighbor 192.168.10.4 peer group spine
+   !
+   vlan 10
+      rd 192.168.10.12:10010
+      route-target both 1:10010
+      redistribute learned
+   !
+   vlan 20
+      rd 192.168.10.12:10020
+      route-target both 1:10020
+      redistribute learned
+   !
+   vlan 30
+      rd 192.168.10.12:10030
+      route-target both 1:10030
+      redistribute learned
+   !
+   vlan 40
+      rd 192.168.10.12:10040
+      route-target both 1:10040
+      redistribute learned
+   !
+   vlan 50
+      rd 192.168.10.12:10050
+      route-target both 1:10050
+      redistribute learned
+   !
+   vlan 60
+      rd 192.168.10.12:10060
+      route-target both 1:10060
+      redistribute learned
+   !
+   vlan 70
+      rd 192.168.10.12:10070
+      route-target both 1:10070
+      redistribute learned
+   !
+   address-family evpn
+      neighbor spine activate
+   !
+   address-family ipv4
+      no neighbor spine activate
+   !
+   vrf DS
+      rd 192.168.10.12:10001
+      route-target import evpn 1:10001
+      route-target export evpn 1:10001
+      network 10.1.50.0/24
+      network 10.1.60.0/24
+      network 10.100.70.0/24
+!
+router ospf 1
+   router-id 192.168.10.11
+   network 10.10.1.5/32 area 0.0.0.0
+   network 10.10.1.13/32 area 0.0.0.0
+   network 192.168.10.11/32 area 0.0.0.0
+   network 192.168.10.12/32 area 0.0.0.0
+   network 192.168.10.13/32 area 0.0.0.0
+   network 192.168.10.112/32 area 0.0.0.0
+   max-lsa 12000
+   maximum-paths 16
+!
+end
+</code></pre>
+</details>
+
+<details>
+<summary>конфиг Leaf2-2</summary>
+<pre><code>
+Leaf2-2(config-if-Et5)#sh run
+! Command: show running-config
+! device: Leaf2-2 (vEOS-lab, EOS-4.26.4M)
+!
+! boot system flash:/vEOS-lab.swi
+!
+no aaa root
+!
+transceiver qsfp default-mode 4x10G
+!
+service routing protocols model multi-agent
+!
+hostname Leaf2-2
+!
+spanning-tree mode mstp
+no spanning-tree vlan-id 4094
+!
+clock timezone Europe/Moscow
+!
+vlan 10,20,30,40,50,60,70
+!
+vlan 4094
+   trunk group mlagpeer
+!
+vrf instance DS
+!
+interface Port-Channel20
+   switchport mode trunk
+   switchport trunk group mlagpeer
+!
+interface Ethernet1
+   no switchport
+   ip address 10.10.1.7/31
+   ip ospf network point-to-point
+!
+interface Ethernet2
+   no switchport
+   ip address 10.10.1.15/31
+   ip ospf network point-to-point
+!
+interface Ethernet3
+   channel-group 20 mode active
+!
+interface Ethernet4
+   channel-group 20 mode active
+!
+interface Ethernet5
+   switchport access vlan 10
+!
+interface Ethernet6
+!
+interface Ethernet7
+!
+interface Ethernet8
+!
+interface Loopback0
+   description OSPF-Router-ID
+   ip address 192.168.10.14/32
+!
+interface Loopback1
+   description BGP-Router-ID
+   ip address 192.168.10.15/32
+!
+interface Loopback100
+   ip address 192.168.10.16/32
+   ip address 192.168.10.112/32 secondary
+!
+interface Management1
+!
+interface Vlan50
+   vrf DS
+   ip address virtual 10.1.50.1/24
+!
+interface Vlan60
+   vrf DS
+   ip address virtual 10.1.60.1/24
+!
+interface Vlan70
+   vrf DS
+   ip address virtual 10.100.70.2/24
+!
+interface Vlan4094
+   ip address 10.0.0.6/30
+!
+interface Vxlan1
+   vxlan source-interface Loopback100
+   vxlan udp-port 4789
+   vxlan vlan 10,20,30,40,50,60,70 vni 10010,10020,10030,10040,10050,10060,10070
+   vxlan vrf DS vni 10001
+!
+ip virtual-router mac-address 00:00:22:22:33:33
+!
+ip routing
+ip routing vrf DS
+!
+mlag configuration
+   domain-id mlag2
+   local-interface Vlan4094
+   peer-address 10.0.0.5
+   peer-link Port-Channel20
+!
+router bgp 65000
+   router-id 192.168.10.15
+   maximum-paths 16
+   neighbor leaf peer group
+   neighbor spine peer group
+   neighbor spine remote-as 65000
+   neighbor spine update-source Loopback1
+   neighbor spine send-community
+   neighbor 192.168.10.2 peer group spine
+   neighbor 192.168.10.4 peer group spine
+   !
+   vlan 10
+      rd 192.168.10.15:10010
+      route-target both 1:10010
+      redistribute learned
+   !
+   vlan 20
+      rd 192.168.10.15:10020
+      route-target both 1:10020
+      redistribute learned
+   !
+   vlan 30
+      rd 192.168.10.15:10030
+      route-target both 1:10030
+      redistribute learned
+   !
+   vlan 40
+      rd 192.168.10.15:10040
+      route-target both 1:10040
+      redistribute learned
+   !
+   vlan 50
+      rd 192.168.10.15:10050
+      route-target both 1:10050
+      redistribute learned
+   !
+   vlan 60
+      rd 192.168.10.15:10060
+      route-target both 1:10060
+      redistribute learned
+   !
+   vlan 70
+      rd 192.168.10.15:10070
+      route-target both 1:10070
+      redistribute learned
+   !
+   address-family evpn
+      neighbor spine activate
+   !
+   address-family ipv4
+      no neighbor spine activate
+   !
+   vrf DS
+      rd 192.168.10.15:10001
+      route-target import evpn 1:10001
+      route-target export evpn 1:10001
+      network 10.1.50.0/24
+      network 10.1.60.0/24
+      network 10.100.70.0/24
+!
+router ospf 1
+   router-id 192.168.10.14
+   network 10.10.1.7/32 area 0.0.0.0
+   network 10.10.1.15/32 area 0.0.0.0
+   network 192.168.10.14/32 area 0.0.0.0
+   network 192.168.10.15/32 area 0.0.0.0
+   network 192.168.10.16/32 area 0.0.0.0
+   network 192.168.10.112/32 area 0.0.0.0
+   max-lsa 12000
+   maximum-paths 16
+!
+end
+</code></pre>
+</details>
+
+
+<details>
+<summary>конфиг Firewall</summary>
+<pre><code>
+Firewall(config)#sh run
+! Command: show running-config
+! device: Firewall (vEOS-lab, EOS-4.26.4M)
+!
+! boot system flash:/vEOS-lab.swi
+!
+no aaa root
+!
+transceiver qsfp default-mode 4x10G
+!
+service routing protocols model multi-agent
+!
+no logging console
+!
+hostname Firewall
+!
+spanning-tree mode mstp
+!
+clock timezone Europe/Moscow
+!
+vlan 10,20,30,40,70
+!
+interface Ethernet1
+   switchport mode trunk
+!
+interface Ethernet2
+!
+interface Ethernet3
+!
+interface Ethernet4
+!
+interface Ethernet5
+!
+interface Ethernet6
+!
+interface Ethernet7
+!
+interface Ethernet8
+!
+interface Loopback1
+   ip address 8.8.8.8/32
+!
+interface Management1
+!
+interface Vlan10
+   ip address 10.1.10.1/24
+!
+interface Vlan20
+   ip address 10.1.20.1/24
+!
+interface Vlan30
+   ip address 10.1.30.1/24
+!
+interface Vlan40
+   ip address 10.1.40.1/24
+!
+interface Vlan70
+   ip address 10.100.70.1/24
+!
+ip routing
+!
+ip route 10.1.50.0/24 10.100.70.2
+ip route 10.1.60.0/24 10.100.70.2
+!
+end
+</code></pre>
+</details>
+
+<details>
+<summary>конфиг SW1</summary>
+<pre><code>
+SW1(config)#sh run
+! Command: show running-config
+! device: SW1 (vEOS-lab, EOS-4.26.4M)
+!
+! boot system flash:/vEOS-lab.swi
+!
+no aaa root
+!
+transceiver qsfp default-mode 4x10G
+!
+service routing protocols model multi-agent
+!
+no logging console
+!
+hostname SW1
+!
+spanning-tree mode mstp
+!
+clock timezone Europe/Moscow
+!
+vlan 10,20,30,40,70
 !
 interface Port-Channel30
    switchport mode trunk
 !
 interface Ethernet1
+   switchport mode trunk
    channel-group 30 mode active
 !
 interface Ethernet2
+   switchport mode trunk
    channel-group 30 mode active
 !
 interface Ethernet3
-   switchport access vlan 221
+   switchport mode trunk
 !
 interface Ethernet4
+   switchport access vlan 30
 !
 interface Ethernet5
 !
@@ -1783,7 +1202,6 @@ interface Management1
 no ip routing
 !
 end
-
 </code></pre>
 </details>
 
